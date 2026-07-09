@@ -32,13 +32,14 @@ Raw SELEX reads / libraries
         │
         ▼
 ┌───────────────────┐
-│  Pre-processing   │  demultiplexing, adapter/barcode handling,
-│                   │  quality trimming, read orientation, QC reports
+│  Pre-processing   │  fastp adapter trim + PE merge (per lane),
+│                   │  lane concat, FASTQ→FASTA, length filter,
+│                   │  trim to fixed k-mers (default 40-mers)
 └─────────┬─────────┘
           │
           ▼
 ┌───────────────────┐
-│  Filtering        │  length/quality filters, duplicate handling,
+│  Filtering        │  enrichment-oriented filters, duplicate handling,
 │                   │  contaminant removal, round-wise retention rules
 └─────────┬─────────┘
           │
@@ -75,13 +76,18 @@ Each stage is designed to be modular: inputs and outputs should be explicit, int
 
 ### 1. Pre-processing
 
-Pre-processing converts instrument or vendor outputs into clean oligonucleotide sequences suitable for enrichment analysis. Typical operations include:
+**Status: implemented** (see [`preprocessing/`](./preprocessing/)).
 
-- Ingestion of round-wise SELEX libraries (FASTQ/FASTA or equivalent).
-- Handling of constant regions, adapters, barcodes, and unique molecular identifiers (UMIs) where present.
-- Base-quality filtering and trimming.
-- Orientation / reverse-complement normalisation when library design requires it.
-- Generation of basic QC summaries (read counts, length distributions, quality profiles).
+Pre-processing converts raw paired-end SELEX FASTQ reads (typically two lanes per sample) into analysis-ready fixed-length sequence sets. The current workflow:
+
+1. **`fastp`** — quality filtering (`-q 10`), adapter trimming (user-supplied adapter FASTA, e.g. TruSeq3 PE), overlap-based merging of R1/R2 (`-m`), polyG/complexity filters, and per-lane HTML/JSON QC reports.
+2. **Lane concatenation** — `cat` the two lane-merged `.fq.gz` files into a single sample-level FASTQ.gz.
+3. **Decompress** — `gzip -d` to an uncompressed FASTQ.
+4. **FASTQ → FASTA** — `seqtk seq -a`.
+5. **Expected-length filter** — retain only sequences of the designed merged-read length (default **101 nt**) via `filter_by_length.py`.
+6. **k-mer extraction** — trim retained reads to fixed-length subsequences (default **40-mers**) via `trim_to_kmer.py`, writing a one-sequence-per-line `.seq` file.
+
+Inputs use a generic sample prefix (`SAMPLE_L1_R1.fastq.gz`, …). Full usage is documented in [`preprocessing/README.md`](./preprocessing/README.md).
 
 ### 2. Filtering
 
@@ -136,16 +142,16 @@ Exact estimators, regularisation choices, and finite-sample corrections will be 
 
 This repository is in an early stage. The documentation above describes the **intended architecture and scientific scope**. Implementation modules, command-line interfaces, configuration schemas, and example datasets will be added incrementally. The README will be updated in lockstep with those changes so that it remains an accurate technical description of available functionality.
 
-| Area                    | Status        |
-|-------------------------|---------------|
-| Pre-processing          | Planned       |
-| Filtering               | Planned       |
-| Re-formatting           | Planned       |
-| Motif discovery         | Planned       |
-| Motif position matching | Planned       |
-| MI analyses             | Planned       |
-| End-to-end CLI / config | Planned       |
-| Example datasets / tests| Planned       |
+| Area                    | Status                                      |
+|-------------------------|---------------------------------------------|
+| Pre-processing          | Implemented (`preprocessing/`)              |
+| Filtering               | Planned                                     |
+| Re-formatting           | Planned                                     |
+| Motif discovery         | Planned                                     |
+| Motif position matching | Planned                                     |
+| MI analyses             | Planned                                     |
+| End-to-end CLI / config | Partial (preprocess driver script)          |
+| Example datasets / tests| Planned                                     |
 
 ---
 
@@ -161,7 +167,19 @@ This repository is in an early stage. The documentation above describes the **in
 
 ## Getting started
 
-Installation, dependency management, and usage instructions will be added once the first executable modules are in place. Until then, this README defines the project scope and the analysis stages SELEXpipe is being built to support.
+### Preprocessing
+
+Requires `fastp`, `seqtk`, `gzip`, `bash`, and `python3`. Place lane FASTQs using the generic naming scheme, then run:
+
+```bash
+./preprocessing/run_preprocess.sh \
+  --sample SAMPLE \
+  --adapter-fasta ./Adapters_TruSeq3PE.fa \
+  --input-dir ./raw \
+  --output-dir ./processed
+```
+
+See [`preprocessing/README.md`](./preprocessing/README.md) for file naming, `fastp` defaults, and standalone helper usage. Further stages (filtering, motif discovery, MI) will gain install/usage docs as they are implemented.
 
 ---
 
