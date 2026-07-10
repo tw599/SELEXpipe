@@ -34,7 +34,7 @@ Raw SELEX reads / libraries
 ┌───────────────────┐
 │  Pre-processing   │  fastp adapter trim + PE merge (per lane),
 │                   │  lane concat, FASTQ→FASTA, length normalize
-│                   │  (fasta101.py), trim to k-mers (default 40)
+│                   │  (filter_by_length.py), trim to k-mers (40)
 └─────────┬─────────┘
           │
           ▼
@@ -84,8 +84,17 @@ Pre-processing converts raw paired-end SELEX FASTQ reads (typically two lanes pe
 2. **Lane concatenation** — `cat` the two lane-merged `.fq.gz` files into a single sample-level FASTQ.gz.
 3. **Decompress** — `gzip -d` to an uncompressed FASTQ.
 4. **FASTQ → FASTA** — `seqtk seq -a`.
-5. **Length normalization (`fasta101.py`)** — retain reads in a user-specified input-length window, then pad or trim so every kept sequence is exactly `--target_length` (required; no hard-coded default such as 154 bp).
+5. **Length normalization (`filter_by_length.py`)** — retain reads in a user-specified input-length window, then pad or trim so every kept sequence is exactly `--target_length`, or the length implied by `--ligand` (see ligand table below; no hard-coded default).
 6. **k-mer extraction** — trim retained reads to fixed-length subsequences (default **40-mers**) via `trim_to_kmer.py`, writing a one-sequence-per-line `.seq` file.
+
+#### Ligand design expected lengths
+
+| Ligand design | Expected length |
+|---------------|-----------------|
+| lig147        | 101 bp          |
+| lig200        | 154 bp          |
+| ligN40        | 187 bp          |
+| ligN70        | 247 bp          |
 
 Inputs use a generic sample prefix (`SAMPLE_L1_R1.fastq.gz`, …). Full usage is documented in [`preprocessing/README.md`](./preprocessing/README.md).
 
@@ -175,7 +184,7 @@ Requires `fastp`, `seqtk`, `gzip`, `bash`, `python3`, and Biopython (`pip instal
 ./preprocessing/run_preprocess.sh \
   --sample SAMPLE \
   --adapter-fasta ./Adapters_TruSeq3PE.fa \
-  --target-length 101 \
+  --ligand lig147 \
   --input-dir ./raw \
   --output-dir ./processed
 ```

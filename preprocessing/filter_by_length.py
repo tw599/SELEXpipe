@@ -4,6 +4,17 @@
 Keeps only reads within an allowed input-length window, then pads shorter
 reads (random A/T/C/G) or trims longer reads so every retained sequence is
 exactly ``--target_length`` bases.
+
+Expected merged-read lengths for common ligand designs:
+
+| Ligand design | Expected length |
+|---------------|-----------------|
+| lig147        | 101 bp          |
+| lig200        | 154 bp          |
+| ligN40        | 187 bp          |
+| ligN70        | 247 bp          |
+
+Use ``--ligand`` to select a design, or ``--target_length`` for an explicit value.
 """
 
 from __future__ import annotations
@@ -15,6 +26,14 @@ import sys
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
+
+# Expected merged-read lengths for supported ligand designs.
+LIGAND_LENGTHS: dict[str, int] = {
+    "lig147": 101,
+    "lig200": 154,
+    "ligN40": 187,
+    "ligN70": 247,
+}
 
 
 def normalize_fasta_to_fixed_length(
@@ -112,19 +131,37 @@ def normalize_fasta_to_fixed_length(
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    ligand_help = ", ".join(
+        f"{name}={length} bp" for name, length in LIGAND_LENGTHS.items()
+    )
     parser = argparse.ArgumentParser(
         description=(
             "Filter FASTA reads by an input-length window, then normalize all "
             "retained reads to a user-specified fixed length (pad or trim)."
-        )
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Ligand design expected lengths:\n"
+            "  lig147  101 bp\n"
+            "  lig200  154 bp\n"
+            "  ligN40  187 bp\n"
+            "  ligN70  247 bp\n"
+        ),
     )
     parser.add_argument("input_fasta", type=str, help="Input FASTA file")
     parser.add_argument("output_fasta", type=str, help="Output FASTA file")
-    parser.add_argument(
+    length_group = parser.add_mutually_exclusive_group(required=True)
+    length_group.add_argument(
         "--target_length",
         type=int,
-        required=True,
-        help="Final required read length (required; no default)",
+        default=None,
+        help="Final required read length (no hard-coded default)",
+    )
+    length_group.add_argument(
+        "--ligand",
+        choices=sorted(LIGAND_LENGTHS),
+        default=None,
+        help=f"Ligand design key used to set target length ({ligand_help})",
     )
     parser.add_argument(
         "--min_input_len",
@@ -162,11 +199,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
+    if args.ligand is not None:
+        target_length = LIGAND_LENGTHS[args.ligand]
+        ligand_label = args.ligand
+    else:
+        target_length = args.target_length
+        ligand_label = None
+
     min_input_len = (
-        args.min_input_len if args.min_input_len is not None else args.target_length
+        args.min_input_len if args.min_input_len is not None else target_length
     )
     max_input_len = (
-        args.max_input_len if args.max_input_len is not None else args.target_length
+        args.max_input_len if args.max_input_len is not None else target_length
     )
 
     if args.seed is not None:
@@ -176,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         stats = normalize_fasta_to_fixed_length(
             input_fasta=args.input_fasta,
             output_fasta=args.output_fasta,
-            target_length=args.target_length,
+            target_length=target_length,
             min_input_len=min_input_len,
             max_input_len=max_input_len,
             trim_from=args.trim_from,
@@ -185,7 +229,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    print(f"[OK] Target length:  {args.target_length}")
+    if ligand_label is not None:
+        print(f"[OK] Ligand design:  {ligand_label}")
+    print(f"[OK] Target length:  {target_length}")
     print(f"[OK] Input window:   {min_input_len}-{max_input_len}")
     print(f"[OK] Total reads:    {stats['total']}")
     print(f"[OK] Reads kept:     {stats['kept']}")
