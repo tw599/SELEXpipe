@@ -33,8 +33,8 @@ Raw SELEX reads / libraries
         ▼
 ┌───────────────────┐
 │  Pre-processing   │  fastp adapter trim + PE merge (per lane),
-│                   │  lane concat, FASTQ→FASTA, length filter,
-│                   │  trim to fixed k-mers (default 40-mers)
+│                   │  lane concat, FASTQ→FASTA, length normalize
+│                   │  (fasta101.py), trim to k-mers (default 40)
 └─────────┬─────────┘
           │
           ▼
@@ -84,7 +84,7 @@ Pre-processing converts raw paired-end SELEX FASTQ reads (typically two lanes pe
 2. **Lane concatenation** — `cat` the two lane-merged `.fq.gz` files into a single sample-level FASTQ.gz.
 3. **Decompress** — `gzip -d` to an uncompressed FASTQ.
 4. **FASTQ → FASTA** — `seqtk seq -a`.
-5. **Expected-length filter** — retain only sequences of the designed merged-read length (default **101 nt**) via `filter_by_length.py`.
+5. **Length normalization (`fasta101.py`)** — retain reads in a user-specified input-length window, then pad or trim so every kept sequence is exactly `--target_length` (required; no hard-coded default such as 154 bp).
 6. **k-mer extraction** — trim retained reads to fixed-length subsequences (default **40-mers**) via `trim_to_kmer.py`, writing a one-sequence-per-line `.seq` file.
 
 Inputs use a generic sample prefix (`SAMPLE_L1_R1.fastq.gz`, …). Full usage is documented in [`preprocessing/README.md`](./preprocessing/README.md).
@@ -169,12 +169,13 @@ This repository is in an early stage. The documentation above describes the **in
 
 ### Preprocessing
 
-Requires `fastp`, `seqtk`, `gzip`, `bash`, and `python3`. Place lane FASTQs using the generic naming scheme, then run:
+Requires `fastp`, `seqtk`, `gzip`, `bash`, `python3`, and Biopython (`pip install -r requirements.txt`). Place lane FASTQs using the generic naming scheme, then run:
 
 ```bash
 ./preprocessing/run_preprocess.sh \
   --sample SAMPLE \
   --adapter-fasta ./Adapters_TruSeq3PE.fa \
+  --target-length 101 \
   --input-dir ./raw \
   --output-dir ./processed
 ```

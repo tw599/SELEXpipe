@@ -10,7 +10,7 @@ For each sample (two sequencing lanes, paired-end):
 2. **Lane concatenation** — concatenate the two lane-merged gzipped FASTQ files into one sample-level FASTQ.gz.
 3. **Decompress** — gunzip the combined FASTQ for downstream conversion.
 4. **FASTQ → FASTA (`seqtk`)** — convert the combined FASTQ to FASTA.
-5. **Length filter** — retain only sequences of the expected merged-read length (default **101 nt**).
+5. **Length normalization (`fasta101.py`)** — keep reads within a user-specified input-length window, then pad or trim so every retained sequence is exactly `--target_length` bases.
 6. **k-mer trim** — extract fixed-length subsequences (default **40-mers**) into a one-sequence-per-line `.seq` file.
 
 ## Generic naming convention
@@ -24,7 +24,7 @@ Replace experiment-specific IDs with a sample prefix `SAMPLE`. Expected inputs u
 | Lane 2, read 1 | `{SAMPLE}_L2_R1.fastq.gz` |
 | Lane 2, read 2 | `{SAMPLE}_L2_R2.fastq.gz` |
 
-Outputs written under `--output-dir/{SAMPLE}/`:
+Outputs written under `--output-dir/{SAMPLE}/` (example with `--target-length 101`):
 
 | Stage | Filename |
 |-------|----------|
@@ -32,8 +32,8 @@ Outputs written under `--output-dir/{SAMPLE}/`:
 | Lane 2 merged | `{SAMPLE}_L2.fq.gz` |
 | Combined lanes | `{SAMPLE}.fq.gz`, `{SAMPLE}.fq` |
 | FASTA | `{SAMPLE}.fa` |
-| Length-filtered FASTA | `{SAMPLE}_101.fa` (or `{SAMPLE}_{N}.fa`) |
-| 40-mers (plain text) | `{SAMPLE}_101.seq` |
+| Length-normalized FASTA | `{SAMPLE}_{N}.fa` |
+| 40-mers (plain text) | `{SAMPLE}_{N}.seq` |
 
 Adapter FASTA is supplied separately (e.g. `Adapters_TruSeq3PE.fa`).
 
@@ -42,6 +42,7 @@ Adapter FASTA is supplied separately (e.g. `Adapters_TruSeq3PE.fa`).
 - [`fastp`](https://github.com/OpenGene/fastp)
 - [`seqtk`](https://github.com/lh3/seqtk)
 - `gzip`, `bash`, `python3` (≥ 3.9 recommended)
+- [Biopython](https://biopython.org/) (`pip install -r requirements.txt`)
 
 ## Usage
 
@@ -49,6 +50,22 @@ Adapter FASTA is supplied separately (e.g. `Adapters_TruSeq3PE.fa`).
 ./preprocessing/run_preprocess.sh \
   --sample SAMPLE \
   --adapter-fasta ./Adapters_TruSeq3PE.fa \
+  --target-length 101 \
+  --input-dir ./raw \
+  --output-dir ./processed
+```
+
+`--target-length` is **required** (no hard-coded default such as 154 or 101). Optionally widen the retention window and control trimming/padding:
+
+```bash
+./preprocessing/run_preprocess.sh \
+  --sample SAMPLE \
+  --adapter-fasta ./Adapters_TruSeq3PE.fa \
+  --target-length 154 \
+  --min-input-len 145 \
+  --max-input-len 163 \
+  --trim-from right \
+  --seed 1 \
   --input-dir ./raw \
   --output-dir ./processed
 ```
@@ -75,15 +92,25 @@ fastp -q 10 \
 cat SAMPLE_L1.fq.gz SAMPLE_L2.fq.gz > SAMPLE.fq.gz
 gzip -d -f SAMPLE.fq.gz
 seqtk seq -a SAMPLE.fq > SAMPLE.fa
-python3 preprocessing/filter_by_length.py SAMPLE.fa SAMPLE_101.fa
+python3 preprocessing/fasta101.py SAMPLE.fa SAMPLE_101.fa --target_length 101
 python3 preprocessing/trim_to_kmer.py SAMPLE_101.fa SAMPLE_101.seq
 ```
 
 ### Helper scripts
 
+`fasta101.py` is the main length-normalization helper. `--target_length` must be supplied by the user (there is no default of 154 bp). If `--min_input_len` / `--max_input_len` are omitted, both default to `--target_length` (exact-length retention only). Shorter reads in the window are padded with random A/T/C/G; longer reads are trimmed (`--trim_from right|left|center`).
+
 ```bash
-# Keep only sequences of length 101 (configurable)
-python3 preprocessing/filter_by_length.py input.fa output_101.fa --length 101
+# Normalize to a user-specified length (required)
+python3 preprocessing/fasta101.py input.fa output_101.fa --target_length 101
+
+# Windowed retention + pad/trim to 154 bp (example)
+python3 preprocessing/fasta101.py input.fa output_154.fa \
+  --target_length 154 \
+  --min_input_len 145 \
+  --max_input_len 163 \
+  --trim_from right \
+  --seed 1
 
 # Extract 40-mers starting at offset 0 (default); use --center to center the window
 python3 preprocessing/trim_to_kmer.py input_101.fa output.seq --kmer-size 40

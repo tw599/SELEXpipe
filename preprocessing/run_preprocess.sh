@@ -5,7 +5,7 @@
 #   1. fastp: quality/adapter trim + merge paired-end reads (per lane)
 #   2. concatenate lane-merged FASTQ.gz files
 #   3. decompress and convert FASTQ -> FASTA (seqtk)
-#   4. filter FASTA to expected merged-read length
+#   4. normalize FASTA to a user-specified fixed length (fasta101.py)
 #   5. trim retained reads to fixed-length k-mers (default 40-mers)
 #
 # Expected per-sample lane inputs (under --input-dir):
@@ -16,8 +16,8 @@
 #   ${SAMPLE}_L1.fq.gz   ${SAMPLE}_L2.fq.gz
 #   ${SAMPLE}.fq.gz      ${SAMPLE}.fq
 #   ${SAMPLE}.fa
-#   ${SAMPLE}_${EXPECTED_LEN}.fa
-#   ${SAMPLE}_${EXPECTED_LEN}.seq
+#   ${SAMPLE}_${TARGET_LEN}.fa
+#   ${SAMPLE}_${TARGET_LEN}.seq
 
 set -euo pipefail
 
@@ -27,7 +27,11 @@ SAMPLE=""
 INPUT_DIR="."
 OUTPUT_DIR="."
 ADAPTER_FASTA=""
-EXPECTED_LEN=101
+TARGET_LEN=""
+MIN_INPUT_LEN=""
+MAX_INPUT_LEN=""
+TRIM_FROM="right"
+SEED=""
 KMER_SIZE=40
 KMER_START=0
 CENTER_KMER=0
@@ -36,16 +40,21 @@ SKIP_FASTP=0
 
 usage() {
   cat <<'EOF'
-Usage: run_preprocess.sh --sample SAMPLE --adapter-fasta ADAPTERS.fa [options]
+Usage: run_preprocess.sh --sample SAMPLE --adapter-fasta ADAPTERS.fa \
+                         --target-length N [options]
 
 Required:
   --sample NAME              Sample prefix (generic; replaces experiment-specific IDs)
   --adapter-fasta PATH       Adapter FASTA for fastp (e.g. Adapters_TruSeq3PE.fa)
+  --target-length N          Fixed length for fasta101.py normalization (required)
 
 Optional:
   --input-dir DIR            Directory containing lane FASTQ.gz files (default: .)
   --output-dir DIR           Directory for outputs (default: .); writes into DIR/SAMPLE/
-  --expected-length N        Merged-read length to retain (default: 101)
+  --min-input-len N          Min input length to retain (default: same as --target-length)
+  --max-input-len N          Max input length to retain (default: same as --target-length)
+  --trim-from MODE           right|left|center trim for long reads (default: right)
+  --seed N                   Random seed for reproducible padding in fasta101.py
   --kmer-size K              K-mer length after trimming (default: 40)
   --kmer-start S             0-based start offset for k-mer window (default: 0)
   --center-kmer              Center the k-mer window instead of using --kmer-start
@@ -57,6 +66,7 @@ Example:
   ./run_preprocess.sh \
       --sample SAMPLE \
       --adapter-fasta ./Adapters_TruSeq3PE.fa \
+      --target-length 101 \
       --input-dir ./raw \
       --output-dir ./processed
 EOF
@@ -81,7 +91,11 @@ while [[ $# -gt 0 ]]; do
     --adapter-fasta) ADAPTER_FASTA="${2:-}"; shift 2 ;;
     --input-dir) INPUT_DIR="${2:-}"; shift 2 ;;
     --output-dir) OUTPUT_DIR="${2:-}"; shift 2 ;;
-    --expected-length) EXPECTED_LEN="${2:-}"; shift 2 ;;
+    --target-length|--expected-length) TARGET_LEN="${2:-}"; shift 2 ;;
+    --min-input-len) MIN_INPUT_LEN="${2:-}"; shift 2 ;;
+    --max-input-len) MAX_INPUT_LEN="${2:-}"; shift 2 ;;
+    --trim-from) TRIM_FROM="${2:-}"; shift 2 ;;
+    --seed) SEED="${2:-}"; shift 2 ;;
     --kmer-size) KMER_SIZE="${2:-}"; shift 2 ;;
     --kmer-start) KMER_START="${2:-}"; shift 2 ;;
     --center-kmer) CENTER_KMER=1; shift ;;
@@ -94,8 +108,14 @@ done
 
 [[ -n "$SAMPLE" ]] || { usage; die "--sample is required"; }
 [[ -n "$ADAPTER_FASTA" ]] || { usage; die "--adapter-fasta is required"; }
+[[ -n "$TARGET_LEN" ]] || { usage; die "--target-length is required"; }
 [[ -f "$ADAPTER_FASTA" ]] || die "adapter FASTA not found: $ADAPTER_FASTA"
 [[ -d "$INPUT_DIR" ]] || die "input directory not found: $INPUT_DIR"
+
+case "$TRIM_FROM" in
+  right|left|center) ;;
+  *) die "--trim-from must be one of: right, left, center" ;;
+esac
 
 require_cmd fastp
 require_cmd gzip
@@ -120,8 +140,8 @@ L2_MERGED="${OUT}/${SAMPLE}_L2.fq.gz"
 COMBINED_GZ="${OUT}/${SAMPLE}.fq.gz"
 COMBINED_FQ="${OUT}/${SAMPLE}.fq"
 FASTA="${OUT}/${SAMPLE}.fa"
-FASTA_FILTERED="${OUT}/${SAMPLE}_${EXPECTED_LEN}.fa"
-KMER_OUT="${OUT}/${SAMPLE}_${EXPECTED_LEN}.seq"
+FASTA_FILTERED="${OUT}/${SAMPLE}_${TARGET_LEN}.fa"
+KMER_OUT="${OUT}/${SAMPLE}_${TARGET_LEN}.seq"
 
 run_fastp_lane() {
   local in1="$1" in2="$2" merged="$3" lane_tag="$4"
@@ -164,11 +184,17 @@ gzip -d -f -c "$COMBINED_GZ" > "$COMBINED_FQ"
 log "FASTQ -> FASTA (seqtk) -> $(basename "$FASTA")"
 seqtk seq -a "$COMBINED_FQ" > "$FASTA"
 
-log "filtering FASTA to length ${EXPECTED_LEN}"
-python3 "${SCRIPT_DIR}/filter_by_length.py" \
-  "$FASTA" \
-  "$FASTA_FILTERED" \
-  --length "$EXPECTED_LEN"
+log "normalizing FASTA to length ${TARGET_LEN} (fasta101.py)"
+FASTA101_ARGS=(
+  "$FASTA"
+  "$FASTA_FILTERED"
+  --target_length "$TARGET_LEN"
+  --trim_from "$TRIM_FROM"
+)
+[[ -n "$MIN_INPUT_LEN" ]] && FASTA101_ARGS+=(--min_input_len "$MIN_INPUT_LEN")
+[[ -n "$MAX_INPUT_LEN" ]] && FASTA101_ARGS+=(--max_input_len "$MAX_INPUT_LEN")
+[[ -n "$SEED" ]] && FASTA101_ARGS+=(--seed "$SEED")
+python3 "${SCRIPT_DIR}/fasta101.py" "${FASTA101_ARGS[@]}"
 
 log "trimming to ${KMER_SIZE}-mers -> $(basename "$KMER_OUT")"
 TRIM_ARGS=("$FASTA_FILTERED" "$KMER_OUT" --kmer-size "$KMER_SIZE")
@@ -183,5 +209,5 @@ log "done"
 log "  lane merges : $L1_MERGED , $L2_MERGED"
 log "  combined    : $COMBINED_GZ / $COMBINED_FQ"
 log "  fasta       : $FASTA"
-log "  length filt : $FASTA_FILTERED"
+log "  length norm : $FASTA_FILTERED"
 log "  k-mers      : $KMER_OUT"
