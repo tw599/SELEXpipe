@@ -51,8 +51,8 @@ Raw SELEX reads / libraries
           │
           ▼
 ┌───────────────────┐
-│  Motif discovery  │  de novo / seeded motif finding, PWM/PSSM
-│                   │  construction, model selection and export
+│  Motif discovery  │  totalautomodelIC + spacek40 on SEQ files
+│                   │  (background vs signal); seed refine; logos
 └─────────┬─────────┘
           │
           ▼
@@ -119,12 +119,24 @@ Re-formatting standardises heterogeneous SELEX artefacts into pipeline-native re
 
 ### 4. Motif discovery
 
-Motif discovery recovers sequence models that explain enrichment. The pipeline is intended to support:
+**Status: implemented** (see [`motif/`](./motif/)).
 
-- De novo motif finding on enriched rounds (and contrasts vs. naïve / early rounds where appropriate).
-- Construction and export of PWMs / PSSMs and related motif representations.
-- Comparison or ranking of candidate motifs.
-- Versioned storage of motif models so downstream matching and MI steps remain reproducible.
+Motif discovery consumes SEQ files from preprocessing (`trim_to_kmer.py`) and runs **`totalautomodelIC`** (with **`spacek40`**) to:
+
+- Discover local-maximum k-mer seeds in signal vs. background libraries.
+- Build and trim PFMs / logos for each seed.
+- Filter by complexity and logo similarity.
+- Refine seeds to an information-content window (10–20 bits).
+- Emit accepted / unrefined / rejected models as SVG logos and PFM artefacts.
+
+Generic naming replaces experiment-specific IDs, e.g.:
+
+```bash
+./totalautomodelIC -40N BACKGROUND_101.seq SIGNAL_r4_101.seq \
+  1 6 6 0.25 - 20 50 0.1 SIGNAL_r4v1
+```
+
+See [`motif/README.md`](./motif/README.md) for the full argument table, driver usage, and the requirement to supply the `spacek40` binary locally.
 
 ### 5. Motif position matching
 
@@ -156,10 +168,10 @@ This repository is in an early stage. The documentation above describes the **in
 | Pre-processing          | Implemented (`preprocessing/`)              |
 | Filtering               | Planned                                     |
 | Re-formatting           | Planned                                     |
-| Motif discovery         | Planned                                     |
+| Motif discovery         | Implemented (`motif/`)                      |
 | Motif position matching | Planned                                     |
 | MI analyses             | Planned                                     |
-| End-to-end CLI / config | Partial (preprocess driver script)          |
+| End-to-end CLI / config | Partial (preprocess + motif drivers)        |
 | Example datasets / tests| Planned                                     |
 
 ---
@@ -189,7 +201,21 @@ Requires `fastp`, `seqtk`, `gzip`, `bash`, `python3`, and Biopython (`pip instal
   --output-dir ./processed
 ```
 
-See [`preprocessing/README.md`](./preprocessing/README.md) for file naming, `fastp` defaults, and standalone helper usage. Further stages (filtering, motif discovery, MI) will gain install/usage docs as they are implemented.
+See [`preprocessing/README.md`](./preprocessing/README.md) for file naming, `fastp` defaults, and standalone helper usage.
+
+### Motif processing
+
+Requires `bash`, `bc`, and the `spacek40` binary placed alongside `motif/totalautomodelIC`. SEQ inputs come from preprocessing. Example:
+
+```bash
+./motif/run_motif.sh \
+  --background ./processed/BACKGROUND/BACKGROUND_101.seq \
+  --signal ./processed/SIGNAL_r4/SIGNAL_r4_101.seq \
+  --output-prefix SIGNAL_r4v1 \
+  --work-dir ./motif_out/SIGNAL_r4
+```
+
+See [`motif/README.md`](./motif/README.md). Further stages (motif position matching, MI) will gain install/usage docs as they are implemented.
 
 ---
 
