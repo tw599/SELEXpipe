@@ -11,7 +11,7 @@ For each sample (two sequencing lanes, paired-end):
 3. **Decompress** — gunzip the combined FASTQ for downstream conversion.
 4. **FASTQ → FASTA (`seqtk`)** — convert the combined FASTQ to FASTA.
 5. **Length normalization (`filter_by_length.py`)** — keep reads within a user-specified input-length window, then pad or trim so every retained sequence is exactly `--target_length` bases (or the length implied by `--ligand`).
-6. **k-mer trim** — extract fixed-length subsequences (default **40-mers**) into a one-sequence-per-line `.seq` file.
+6. **k-mer / SEQ conversion (`trim_to_kmer.py`)** — split each retained FASTA read into consecutive fixed-length lines (default **40 bp**), padding any short trailing chunk with random A/T/C/G, into a one-sequence-per-line `.seq` file.
 
 ## Ligand design expected lengths
 
@@ -126,8 +126,11 @@ python3 preprocessing/filter_by_length.py input.fa output_154.fa \
   --trim_from right \
   --seed 1
 
-# Extract 40-mers starting at offset 0 (default); use --center to center the window
-python3 preprocessing/trim_to_kmer.py input_101.fa output.seq --kmer-size 40
+# Split into 40-base SEQ lines; pad short trailing chunks with random ATCG
+python3 preprocessing/trim_to_kmer.py input_101.fa output.seq --length 40
+
+# Reproducible padding
+python3 preprocessing/trim_to_kmer.py input_101.fa output.seq --length 40 --seed 1
 ```
 
 ## `fastp` parameters (current defaults)

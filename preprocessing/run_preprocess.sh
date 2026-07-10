@@ -40,8 +40,7 @@ MAX_INPUT_LEN=""
 TRIM_FROM="right"
 SEED=""
 KMER_SIZE=40
-KMER_START=0
-CENTER_KMER=0
+KMER_SEED=""
 THREADS="$(nproc 2>/dev/null || echo 4)"
 SKIP_FASTP=0
 
@@ -81,10 +80,9 @@ Optional:
   --min-input-len N          Min input length to retain (default: same as target length)
   --max-input-len N          Max input length to retain (default: same as target length)
   --trim-from MODE           right|left|center trim for long reads (default: right)
-  --seed N                   Random seed for reproducible padding in filter_by_length.py
-  --kmer-size K              K-mer length after trimming (default: 40)
-  --kmer-start S             0-based start offset for k-mer window (default: 0)
-  --center-kmer              Center the k-mer window instead of using --kmer-start
+  --seed N                   Random seed for filter_by_length.py padding
+  --kmer-size K              SEQ line / k-mer length for trim_to_kmer.py (default: 40)
+  --kmer-seed N              Random seed for trim_to_kmer.py short-chunk padding
   --threads N                Threads hint for fastp (default: nproc)
   --skip-fastp               Resume from existing lane-merged FASTQ.gz outputs
   -h, --help                 Show this help
@@ -125,8 +123,7 @@ while [[ $# -gt 0 ]]; do
     --trim-from) TRIM_FROM="${2:-}"; shift 2 ;;
     --seed) SEED="${2:-}"; shift 2 ;;
     --kmer-size) KMER_SIZE="${2:-}"; shift 2 ;;
-    --kmer-start) KMER_START="${2:-}"; shift 2 ;;
-    --center-kmer) CENTER_KMER=1; shift ;;
+    --kmer-seed) KMER_SEED="${2:-}"; shift 2 ;;
     --threads) THREADS="${2:-}"; shift 2 ;;
     --skip-fastp) SKIP_FASTP=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -241,13 +238,9 @@ fi
 [[ -n "$SEED" ]] && FILTER_ARGS+=(--seed "$SEED")
 python3 "${SCRIPT_DIR}/filter_by_length.py" "${FILTER_ARGS[@]}"
 
-log "trimming to ${KMER_SIZE}-mers -> $(basename "$KMER_OUT")"
-TRIM_ARGS=("$FASTA_FILTERED" "$KMER_OUT" --kmer-size "$KMER_SIZE")
-if [[ "$CENTER_KMER" -eq 1 ]]; then
-  TRIM_ARGS+=(--center)
-else
-  TRIM_ARGS+=(--start "$KMER_START")
-fi
+log "writing ${KMER_SIZE}-base SEQ lines -> $(basename "$KMER_OUT")"
+TRIM_ARGS=("$FASTA_FILTERED" "$KMER_OUT" --length "$KMER_SIZE")
+[[ -n "$KMER_SEED" ]] && TRIM_ARGS+=(--seed "$KMER_SEED")
 python3 "${SCRIPT_DIR}/trim_to_kmer.py" "${TRIM_ARGS[@]}"
 
 log "done"

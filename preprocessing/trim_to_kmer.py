@@ -1,139 +1,109 @@
 #!/usr/bin/env python3
-"""Trim filtered FASTA sequences to fixed-length k-mers (default: 40-mers).
+"""Convert FASTA reads into a SEQ file of fixed-length lines (default: 40-mers).
 
-By default each retained sequence is written as a plain one-sequence-per-line
-``.seq`` file. Use ``--fasta`` to emit FASTA instead. The extraction window is
-controlled by ``--start`` / ``--center``.
+Each FASTA record is split into consecutive chunks of ``--length`` bases.
+Trailing chunks shorter than ``--length`` are padded on the right with random
+A/T/C/G bases. Output is one sequence per line (no FASTA headers).
 """
 
 from __future__ import annotations
 
 import argparse
+import random
 import sys
-from pathlib import Path
 
 
-def parse_args() -> argparse.Namespace:
+def pad_sequence(seq: str, length: int = 40) -> str:
+    if len(seq) < length:
+        padding = "".join(random.choices("ATCG", k=length - len(seq)))
+        return seq + padding
+    return seq
+
+
+def process_fasta_to_seq(
+    input_fasta: str,
+    output_seq: str,
+    line_length: int = 40,
+) -> dict[str, int]:
+    if line_length <= 0:
+        raise ValueError(f"length must be positive, got {line_length}")
+
+    n_records = 0
+    n_lines = 0
+    n_padded = 0
+
+    with open(input_fasta, "r") as infile, open(output_seq, "w") as outfile:
+        current_seq = ""
+        for line in infile:
+            line = line.strip()
+            if line.startswith(">"):
+                if current_seq:
+                    n_records += 1
+                    for i in range(0, len(current_seq), line_length):
+                        chunk = current_seq[i : i + line_length]
+                        if len(chunk) < line_length:
+                            n_padded += 1
+                        outfile.write(pad_sequence(chunk, line_length) + "\n")
+                        n_lines += 1
+                    current_seq = ""
+            else:
+                current_seq += line.upper()
+
+        # Process the last read
+        if current_seq:
+            n_records += 1
+            for i in range(0, len(current_seq), line_length):
+                chunk = current_seq[i : i + line_length]
+                if len(chunk) < line_length:
+                    n_padded += 1
+                outfile.write(pad_sequence(chunk, line_length) + "\n")
+                n_lines += 1
+
+    return {
+        "records": n_records,
+        "lines": n_lines,
+        "padded_chunks": n_padded,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Trim FASTA sequences to fixed-length k-mers (e.g. 40-mers)."
+        description=(
+            "Convert FASTA reads into a SEQ file with fixed-length lines "
+            "(default 40 bases), padded with random bases if needed."
+        )
     )
-    parser.add_argument("input_fasta", type=Path, help="Input FASTA file (typically length-filtered)")
-    parser.add_argument("output_path", type=Path, help="Output .seq (or FASTA) path")
+    parser.add_argument("input", help="Path to the input FASTA file")
+    parser.add_argument("output", help="Path to the output SEQ file")
     parser.add_argument(
-        "-k",
-        "--kmer-size",
+        "--length",
         type=int,
         default=40,
-        help="K-mer length to extract (default: 40)",
-    )
-    start_group = parser.add_mutually_exclusive_group()
-    start_group.add_argument(
-        "-s",
-        "--start",
-        type=int,
-        default=0,
-        help="0-based start offset for the k-mer window (default: 0)",
-    )
-    start_group.add_argument(
-        "--center",
-        action="store_true",
-        help="Center the k-mer window within each sequence",
+        help="Line length for each sequence fragment (default: 40)",
     )
     parser.add_argument(
-        "--fasta",
-        action="store_true",
-        help="Write FASTA output instead of one sequence per line",
+        "--seed",
+        type=int,
+        help="Random seed for reproducibility (optional)",
     )
-    return parser.parse_args()
 
+    args = parser.parse_args(argv)
 
-def iter_fasta(path: Path):
-    header: str | None = None
-    seq_chunks: list[str] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.rstrip("\n")
-            if not line:
-                continue
-            if line.startswith(">"):
-                if header is not None:
-                    yield header, "".join(seq_chunks).replace(" ", "").replace("\t", "")
-                header = line[1:].strip() or line
-                seq_chunks = []
-            else:
-                if header is None:
-                    raise ValueError(f"Malformed FASTA in {path}: sequence before header")
-                seq_chunks.append(line.strip())
-        if header is not None:
-            yield header, "".join(seq_chunks).replace(" ", "").replace("\t", "")
-
-
-def trim_to_kmers(
-    input_fasta: Path,
-    output_path: Path,
-    kmer_size: int,
-    start: int,
-    center: bool,
-    as_fasta: bool,
-) -> tuple[int, int]:
-    if kmer_size <= 0:
-        raise ValueError(f"k-mer size must be positive, got {kmer_size}")
-    if start < 0:
-        raise ValueError(f"start offset must be >= 0, got {start}")
-
-    total = 0
-    written = 0
-
-    with output_path.open("w", encoding="utf-8") as out:
-        for header, sequence in iter_fasta(input_fasta):
-            total += 1
-            if len(sequence) < kmer_size:
-                continue
-
-            if center:
-                window_start = (len(sequence) - kmer_size) // 2
-            else:
-                window_start = start
-
-            window_end = window_start + kmer_size
-            if window_start < 0 or window_end > len(sequence):
-                continue
-
-            kmer = sequence[window_start:window_end]
-            if as_fasta:
-                out.write(f">{header}\n")
-                for i in range(0, len(kmer), 80):
-                    out.write(kmer[i : i + 80] + "\n")
-            else:
-                out.write(kmer + "\n")
-            written += 1
-
-    return total, written
-
-
-def main() -> int:
-    args = parse_args()
-    if not args.input_fasta.is_file():
-        print(f"error: input FASTA not found: {args.input_fasta}", file=sys.stderr)
-        return 1
+    if args.seed is not None:
+        random.seed(args.seed)
 
     try:
-        total, written = trim_to_kmers(
-            args.input_fasta,
-            args.output_path,
-            args.kmer_size,
-            args.start,
-            args.center,
-            args.fasta,
-        )
+        stats = process_fasta_to_seq(args.input, args.output, args.length)
     except Exception as exc:  # noqa: BLE001 - surface parse/IO errors to CLI
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    mode = "centered" if args.center else f"start={args.start}"
     print(
-        f"trim_to_kmer: wrote {written}/{total} {args.kmer_size}-mers ({mode}) "
-        f"-> {args.output_path}"
+        f"[OK] FASTA records:   {stats['records']}\n"
+        f"[OK] SEQ lines:       {stats['lines']} "
+        f"(length={args.length})\n"
+        f"[OK] Padded chunks:   {stats['padded_chunks']}\n"
+        f"[OK] Wrote:           {args.output}"
     )
     return 0
 

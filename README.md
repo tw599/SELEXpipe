@@ -85,7 +85,7 @@ Pre-processing converts raw paired-end SELEX FASTQ reads (typically two lanes pe
 3. **Decompress** — `gzip -d` to an uncompressed FASTQ.
 4. **FASTQ → FASTA** — `seqtk seq -a`.
 5. **Length normalization (`filter_by_length.py`)** — retain reads in a user-specified input-length window, then pad or trim so every kept sequence is exactly `--target_length`, or the length implied by `--ligand` (see ligand table below; no hard-coded default).
-6. **k-mer extraction** — trim retained reads to fixed-length subsequences (default **40-mers**) via `trim_to_kmer.py`, writing a one-sequence-per-line `.seq` file.
+6. **k-mer / SEQ conversion** — split retained reads into consecutive fixed-length lines (default **40 bp**) via `trim_to_kmer.py`, padding any short trailing chunk with random A/T/C/G, writing a one-sequence-per-line `.seq` file.
 
 #### Ligand design expected lengths
 
